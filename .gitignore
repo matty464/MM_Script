@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log
+logs/
+state/
+!state/.gitkeep
+.DS_Store

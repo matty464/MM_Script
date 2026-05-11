@@ -1,0 +1,160 @@
+# =============================================================================
+# Hyperliquid Market-Making Bot — Configuration
+# =============================================================================
+# Copy to config.yaml and edit. Start on TESTNET, in PAPER mode, with TINY size.
+# =============================================================================
+
+# Network: "testnet" or "mainnet". Always start on testnet.
+network: mainnet
+
+# Mode:
+#   paper  -> simulate fills internally, never sends real orders (SAFEST)
+#   live   -> sends real orders to Hyperliquid
+mode: paper
+
+# The single perp market to make. Pick a liquid one to start (e.g. ETH, SOL).
+# Less competitive small-caps may give wider edges but carry more risk.
+symbol: ETH
+
+# ---------------------------------------------------------------------------
+# Leverage
+# ---------------------------------------------------------------------------
+# Per-symbol leverage multiplier. Applied to your Hyperliquid account on
+# startup (live mode only — paper mode ignores this).
+#
+# Margin math for a $1,000 account at 5x leverage:
+#   max position notional = $5,000  → margin used = $5,000 / 5 = $1,000 (100%)
+#   liquidation occurs roughly when unrealized loss = (margin - maint_margin).
+#   For ETH the maintenance margin is ~2.5% of notional = $125 at full size,
+#   so you'd be liquidated when down ~$875 → ~17.5% adverse move on ETH.
+#   That's possible in a flash crash. Keep `max_session_loss_usd` well below
+#   that to bail out before liquidation.
+leverage: 5
+margin_mode: cross   # "cross" (whole account collateralizes) or "isolated"
+
+# Paper-mode fill probability per book update when your price is touched.
+# 1.0 = fill instantly on any touch (very optimistic — unrealistic).
+# 0.1 = ~10% chance per second when touched (roughly models queue position).
+# Lower this if paper fills are happening too fast vs your expectations.
+paper_fill_prob: 0.1
+
+# ---------------------------------------------------------------------------
+# Sizing
+# ---------------------------------------------------------------------------
+# Notional (USD) per quote on each side.
+# At $1,000/side and 5x leverage, a single fill uses $200 of margin (20% of a
+# $1,000 account). A fully stacked long (5 fills, capped by max_position) uses
+# the whole $1,000 of margin.
+quote_notional_usd: 1000
+
+# Hard cap on absolute position notional (USD). When breached, the bot will
+# only quote the side that reduces inventory.
+# At $5,000 with a $1,000 account, this is exactly the leverage limit.
+max_position_notional_usd: 5000
+
+# ---------------------------------------------------------------------------
+# Pricing
+# ---------------------------------------------------------------------------
+# Minimum half-spread (in basis points, 1bp = 0.01%) you will quote at.
+# Must comfortably exceed your maker fee. At base tier, HL maker fee is 1.5bp,
+# so a round-trip costs ~3bp. Anything tighter than that loses money on fees alone.
+min_half_spread_bps: 4.0
+
+# Volatility multiplier applied to recent realized vol (per second, annualized).
+# Effective half-spread = max(min_half_spread_bps, vol_factor * sigma_bps).
+vol_factor: 1.5
+
+# Window (seconds) over which to estimate short-term volatility from mid changes.
+vol_window_seconds: 60
+
+# EWMA on sigma: fast up / slow down after spikes (smoother half-spreads).
+sigma_ewma_alpha_up: 0.30
+sigma_ewma_alpha_down: 0.07
+
+# Tighter vol widening on the flatten side when inventory is non-zero (1 = symmetric).
+inventory_flatten_vol_half_spread_mult: 0.65
+
+# Inventory skew: how aggressively to shift quotes to flatten position.
+# Quote midpoint shift = -skew_bps * (position / max_position).
+# Larger value -> faster mean reversion of inventory, but worse fills.
+inventory_skew_bps: 6.0
+
+# Re-quote when our resting price drifts more than this many bps from target.
+requote_threshold_bps: 1.5
+
+# ---------------------------------------------------------------------------
+# Loop / behavior
+# ---------------------------------------------------------------------------
+# How often (seconds) the strategy loop wakes up to re-evaluate quotes.
+loop_interval_seconds: 1.0
+
+# Maximum age (seconds) of the latest book update before we treat the feed as
+# stale, cancel everything, and stop quoting.
+max_book_age_seconds: 15.0
+
+# Cancel-all on start (clean slate) and on shutdown.
+cancel_all_on_start: true
+cancel_all_on_exit: true
+
+# Default behavior: no MM orders until dashboard "Start live quoting". Set false
+# to quote immediately on startup. Book/trades still run for ML warmup when true.
+manual_quoting_start: true
+
+# ---------------------------------------------------------------------------
+# Risk / kill switches
+# ---------------------------------------------------------------------------
+# If realized session PnL drops below this many USD, the bot stops quoting,
+# flattens position with a market order, and exits.
+# At a $1,000 account, $150 = 15% session drawdown — well below the
+# liquidation threshold (~$875 at full 5x stack on ETH).
+max_session_loss_usd: 150
+
+# If a single fill moves PnL by more than this (USD), pause for `pause_seconds`.
+# Helps survive obvious adverse-selection events.
+# At $1k notional per fill, $50 = ~50bps adverse on the fill — clearly toxic flow.
+single_fill_pnl_alarm_usd: 50
+pause_seconds_after_alarm: 30
+
+# Hard maximum number of orders submitted per minute (rate limit guard).
+max_orders_per_minute: 60
+
+# ---------------------------------------------------------------------------
+# Machine Learning — fair-value signal (Recursive Least Squares)
+# ---------------------------------------------------------------------------
+ml:
+  enabled: true
+  horizon_s: 10.0
+  forgetting_factor: 0.990
+  max_signal_bps: 10.0
+  min_updates: 30
+
+# ---------------------------------------------------------------------------
+# Adaptive inventory-skew controller (multi-armed bandit)
+# ---------------------------------------------------------------------------
+# Continuously trials different multipliers of `inventory_skew_bps` above
+# and learns from per-fill realized PnL which one produces the best edge.
+# State persists to state/skew_adapter.json across restarts.
+#
+# How it works:
+#   - When a closing fill produces realized PnL, edge_bps = pnl/notional*1e4
+#     is fed into the currently-active arm's reward EWMA.
+#   - After `min_pulls_per_switch` observations on the active arm, the bot
+#     either explores a random arm (with probability = epsilon) or locks
+#     onto the highest-mean arm (with probability 1-epsilon).
+#   - Effective skew = inventory_skew_bps * active_multiplier.
+#
+# Disable to fall back to the static `inventory_skew_bps` config value.
+adaptive_skew:
+  enabled: true
+  epsilon: 0.15                  # exploration rate (0=pure exploit, 1=pure random)
+  ewma_alpha: 0.2                # how fast per-arm reward updates (0..1)
+  min_pulls_per_switch: 5        # closing fills before switching arms
+  multipliers: [0.5, 0.75, 1.0, 1.25, 1.5]
+
+# ---------------------------------------------------------------------------
+# Dashboard (web UI)
+# ---------------------------------------------------------------------------
+dashboard:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765
