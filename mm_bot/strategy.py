@@ -142,6 +142,25 @@ class Strategy:
         log.warning("[quoting] manual arm — bid/ask placement ENABLED")
         self._quoting_armed = True
 
+    def disarm_quoting(self) -> None:
+        """Disable bid/ask placement (manual_quoting_start mode). Cancels resting MM orders."""
+        if not self.cfg.manual_quoting_start:
+            log.warning("[quoting] disarm ignored — set manual_quoting_start: true to use start/stop quoting")
+            return
+        if not self._quoting_armed:
+            return
+        log.warning("[quoting] manual disarm — bid/ask placement OFF, cancelling MM orders")
+        self._quoting_armed = False
+        try:
+            existing_bid = self.executor.state.by_side(True)
+            existing_ask = self.executor.state.by_side(False)
+            if existing_bid is not None:
+                self.executor.cancel(existing_bid)
+            if existing_ask is not None:
+                self.executor.cancel(existing_ask)
+        except Exception as exc:
+            log.warning("[quoting] disarm cancel failed: %s", exc)
+
     def start(self) -> None:
         log.info(
             "starting strategy: network=%s mode=%s symbol=%s",

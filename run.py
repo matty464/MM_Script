@@ -182,6 +182,7 @@ def main() -> int:
                 flatten_sell_fn=_do_flatten_sell,
                 update_config_fn=strategy.apply_runtime_update,
                 start_quoting_fn=strategy.arm_quoting,
+                stop_quoting_fn=strategy.disarm_quoting,
             )
             dashboard.start()
             log.info(

@@ -72,6 +72,12 @@ INDEX_HTML = """<!doctype html>
     border-radius: 8px;
     padding: 14px 16px;
   }
+  #dash-grid.layout-edit .card[data-dash-card] {
+    cursor: grab;
+    outline: 1px dashed rgba(251, 191, 36, 0.45);
+    outline-offset: 2px;
+  }
+  #dash-grid.layout-edit .card[data-dash-card]:active { cursor: grabbing; }
   .card h2 {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
     color: var(--muted); margin: 0 0 10px;
@@ -149,45 +155,59 @@ INDEX_HTML = """<!doctype html>
       padding:5px 14px; border-radius:6px; cursor:pointer; font:inherit;
       font-size:12px; font-weight:600; letter-spacing:.04em;
     ">▶ Start live quoting</button>
+    <button id="stop-quote-btn" type="button" onclick="stopLiveQuoting()" style="
+      display:none; margin-left:6px; background:#3a1e1e; border:1px solid #7a2a2a; color:#f87171;
+      padding:5px 14px; border-radius:6px; cursor:pointer; font:inherit;
+      font-size:12px; font-weight:600; letter-spacing:.04em;
+    ">■ Stop quoting</button>
   </span>
+  <button id="layout-edit-btn" type="button" onclick="toggleLayoutEdit()" aria-pressed="false" style="
+    background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+    padding:5px 14px; border-radius:6px; cursor:pointer; font:inherit;
+    font-size:12px; font-weight:600; letter-spacing:.04em;
+  ">Rearrange panels</button>
+  <button type="button" onclick="resetDashLayout()" title="Restore default panel order" style="
+    background:transparent; border:1px solid var(--border); color:var(--muted);
+    padding:5px 10px; border-radius:6px; cursor:pointer; font:inherit; font-size:11px;
+  ">Reset layout</button>
   <span id="last-update" class="pill"></span>
 </header>
 
 <main>
-  <div class="grid">
+  <div id="dash-grid" class="grid">
 
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-mid">
       <h2>Mid</h2>
       <div id="mid" class="kpi neutral">—</div>
       <div id="spread" class="kpi sub">—</div>
     </div>
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-sigma">
       <h2>Sigma (bp/s)</h2>
       <div id="sigma" class="kpi neutral">—</div>
       <div class="kpi sub">realized vol estimate</div>
     </div>
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-position">
       <h2>Position</h2>
       <div id="pos-size" class="kpi neutral">—</div>
       <div id="pos-notional" class="kpi sub">—</div>
     </div>
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-pnl-realized">
       <h2>Realized PnL</h2>
       <div id="pnl-realized" class="kpi neutral">—</div>
       <div id="fills-count" class="kpi sub">0 fills</div>
     </div>
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-pnl-unrealized">
       <h2>Unrealized PnL</h2>
       <div id="pnl-unrealized" class="kpi neutral">—</div>
       <div id="avg-entry" class="kpi sub">—</div>
     </div>
-    <div class="card span2">
+    <div class="card span2" data-dash-card="kpi-pnl-total">
       <h2>Total PnL</h2>
       <div id="pnl-total" class="kpi neutral">—</div>
       <div id="loss-budget" class="kpi sub">—</div>
     </div>
 
-    <div class="card span12">
+    <div class="card span12" data-dash-card="chart-price">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <h2 style="margin:0">Price Chart</h2>
         <div style="display:flex;gap:10px;align-items:center;font-size:12px">
@@ -207,7 +227,7 @@ INDEX_HTML = """<!doctype html>
       <canvas id="price-chart" style="width:100%;display:block;border-radius:6px;background:var(--panel2)"></canvas>
     </div>
 
-    <div class="card span6">
+    <div class="card span6" data-dash-card="quote-current">
       <h2>Current Quote</h2>
       <div class="stack">
         <div class="row"><span class="label">fair px</span><span id="q-fair" class="val">—</span></div>
@@ -222,7 +242,7 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
-    <div class="card span12">
+    <div class="card span12" data-dash-card="book-depth">
       <h2>Order Book <span style="color:var(--muted);font-weight:400;font-size:11px">— your orders shown with glow · depth bar = cumulative size</span></h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
         <!-- ASKS (top half) -->
@@ -259,7 +279,7 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
-    <div class="card span6">
+    <div class="card span6" data-dash-card="fills-recent">
       <h2>Recent Fills</h2>
       <table>
         <thead><tr>
@@ -271,7 +291,7 @@ INDEX_HTML = """<!doctype html>
       <div id="fills-empty" class="empty">no fills yet</div>
     </div>
 
-    <div class="card span6">
+    <div class="card span6" data-dash-card="ml-signal">
       <h2>ML Signal — RLS Fair-Value Predictor</h2>
       <div class="stack" id="ml-stack">
         <div class="row"><span class="label">status</span><span id="ml-status" class="val">warming up…</span></div>
@@ -287,7 +307,7 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
-    <div class="card span12">
+    <div class="card span12" data-dash-card="ml-adapt">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <h2 style="margin:0">ML Adaptation — How the model is learning</h2>
         <div id="ml-adapt-summary" style="font-size:12px;color:var(--muted)">—</div>
@@ -314,7 +334,7 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
-    <div class="card span12">
+    <div class="card span12" data-dash-card="skew-adaptive">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
         <h2 style="margin:0">Adaptive Inventory Skew — bandit-learned multiplier</h2>
         <div id="skew-summary" style="font-size:12px;color:var(--muted)">—</div>
@@ -355,12 +375,12 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
-    <div class="card span6">
+    <div class="card span6" data-dash-card="config-panel">
       <h2>Configuration</h2>
       <div id="config-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px;"></div>
     </div>
 
-    <div class="card span12">
+    <div class="card span12" data-dash-card="live-tuning">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <h2 style="margin:0">Live Tuning — change parameters without restarting</h2>
         <div style="display:flex;gap:8px;align-items:center">
@@ -388,7 +408,7 @@ INDEX_HTML = """<!doctype html>
 </main>
 
 <footer>
-  Polls /api/snapshot every 1s · trade at your own risk
+  Polls /api/snapshot every 1s · trade at your own risk · panel order is saved in this browser (Reset layout restores defaults)
 </footer>
 
 <script>
@@ -406,6 +426,94 @@ const fmt = {
   },
   time: ts => ts ? new Date(ts * 1000).toLocaleTimeString() : '—',
 };
+
+const DASH_CARD_ORDER_KEY = 'hl-mm-dashboard-card-order-v1';
+let layoutEditOn = false;
+
+function getDashGridCards() {
+  const grid = document.getElementById('dash-grid');
+  if (!grid) return [];
+  return [...grid.querySelectorAll(':scope > [data-dash-card]')];
+}
+
+function applySavedCardOrder() {
+  const grid = document.getElementById('dash-grid');
+  if (!grid) return;
+  let order;
+  try {
+    order = JSON.parse(localStorage.getItem(DASH_CARD_ORDER_KEY) || 'null');
+  } catch (e) { order = null; }
+  if (!Array.isArray(order) || order.length === 0) return;
+  const cards = getDashGridCards();
+  const byId = new Map(cards.map(c => [c.getAttribute('data-dash-card'), c]));
+  const frag = document.createDocumentFragment();
+  const seen = new Set();
+  for (const id of order) {
+    const el = byId.get(id);
+    if (el) { frag.appendChild(el); seen.add(id); }
+  }
+  for (const c of cards) {
+    const id = c.getAttribute('data-dash-card');
+    if (id && !seen.has(id)) frag.appendChild(c);
+  }
+  grid.appendChild(frag);
+}
+
+function saveCardOrder() {
+  const ids = getDashGridCards().map(c => c.getAttribute('data-dash-card')).filter(Boolean);
+  try {
+    localStorage.setItem(DASH_CARD_ORDER_KEY, JSON.stringify(ids));
+  } catch (e) { /* quota / private mode */ }
+}
+
+function toggleLayoutEdit() {
+  layoutEditOn = !layoutEditOn;
+  const grid = document.getElementById('dash-grid');
+  const btn = document.getElementById('layout-edit-btn');
+  if (grid) grid.classList.toggle('layout-edit', layoutEditOn);
+  if (btn) {
+    btn.textContent = layoutEditOn ? 'Done rearranging' : 'Rearrange panels';
+    btn.setAttribute('aria-pressed', layoutEditOn ? 'true' : 'false');
+  }
+  getDashGridCards().forEach(c => { c.draggable = layoutEditOn; });
+}
+
+function resetDashLayout() {
+  if (!confirm('Reset panel order to default?')) return;
+  try { localStorage.removeItem(DASH_CARD_ORDER_KEY); } catch (e) {}
+  location.reload();
+}
+
+function initDashLayoutDrag() {
+  const grid = document.getElementById('dash-grid');
+  if (!grid) return;
+  let dragged = null;
+  grid.querySelectorAll('[data-dash-card]').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      if (!layoutEditOn) { e.preventDefault(); return; }
+      dragged = card;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', card.getAttribute('data-dash-card') || ''); } catch (err) {}
+    });
+    card.addEventListener('dragend', () => { dragged = null; });
+    card.addEventListener('dragover', (e) => {
+      if (!layoutEditOn || !dragged) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    card.addEventListener('drop', (e) => {
+      if (!layoutEditOn || !dragged || dragged === card) return;
+      e.preventDefault();
+      const all = [...grid.querySelectorAll(':scope > [data-dash-card]')];
+      const iFrom = all.indexOf(dragged);
+      const iTo = all.indexOf(card);
+      if (iFrom < 0 || iTo < 0) return;
+      if (iFrom < iTo) grid.insertBefore(dragged, card.nextSibling);
+      else grid.insertBefore(dragged, card);
+      saveCardOrder();
+    });
+  });
+}
 
 function pnlClass(v) {
   if (v == null) return 'neutral';
@@ -889,6 +997,7 @@ async function tick() {
     statusPill(snap);
     const sqw = document.getElementById('start-quote-wrap');
     const sqb = document.getElementById('start-quote-btn');
+    const stqb = document.getElementById('stop-quote-btn');
     if (sqw && sqb) {
       const manual = snap.config && snap.config.manual_quoting_start;
       if (manual) {
@@ -898,11 +1007,21 @@ async function tick() {
           sqb.textContent = '▶ Start live quoting';
           sqb.style.opacity = '1';
           sqb.style.cursor = 'pointer';
+          if (stqb) {
+            stqb.style.display = 'none';
+            stqb.disabled = false;
+            if (stqb.textContent === 'stopping…' || stqb.textContent === 'stopped ✓')
+              stqb.textContent = '■ Stop quoting';
+          }
         } else {
           sqb.disabled = true;
           sqb.textContent = 'Live quoting on ✓';
           sqb.style.cursor = 'default';
           sqb.style.opacity = '0.9';
+          if (stqb) {
+            stqb.style.display = 'inline';
+            if (stqb.textContent !== 'stopping…') stqb.disabled = false;
+          }
         }
       } else {
         sqw.style.display = 'none';
@@ -1473,6 +1592,30 @@ async function startLiveQuoting() {
   setTimeout(() => { btn.textContent = prev; }, 4500);
 }
 
+async function stopLiveQuoting() {
+  const btn = document.getElementById('stop-quote-btn');
+  if (!btn || btn.disabled) return;
+  if (!confirm("Stop posting bid and ask quotes? The bot's MM orders will be cancelled.")) return;
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'stopping…';
+  try {
+    const r = await fetch('/api/stop_quoting', { method: 'POST', cache: 'no-store' });
+    const d = await r.json();
+    if (d.ok) {
+      btn.textContent = 'stopped ✓';
+      btn.disabled = false;
+      return;
+    }
+    btn.textContent = '✗ ' + (d.error || '?');
+    btn.disabled = false;
+  } catch (e) {
+    btn.textContent = '✗ ' + e.message;
+    btn.disabled = false;
+  }
+  setTimeout(() => { btn.textContent = prev; }, 4500);
+}
+
 async function cancelAll() {
   const btn = document.getElementById('cancel-btn');
   btn.textContent = 'cancelling…';
@@ -1500,6 +1643,8 @@ async function cancelAll() {
   }, 3000);
 }
 
+applySavedCardOrder();
+initDashLayoutDrag();
 tick();
 setInterval(tick, 1000);
 </script>
@@ -1515,6 +1660,7 @@ def _make_handler(
     flatten_sell_fn: Optional[Callable[[], None]] = None,
     update_config_fn: Optional[Callable[[dict], dict]] = None,
     start_quoting_fn: Optional[Callable[[], None]] = None,
+    stop_quoting_fn: Optional[Callable[[], None]] = None,
 ):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -1556,6 +1702,17 @@ def _make_handler(
                     return
                 try:
                     start_quoting_fn()
+                    self._send_json(200, {"ok": True})
+                except Exception as exc:
+                    self._send_json(500, {"ok": False, "error": str(exc)})
+                return
+
+            if self.path == "/api/stop_quoting":
+                if stop_quoting_fn is None:
+                    self._send_json(400, {"ok": False, "error": "stop quoting not available"})
+                    return
+                try:
+                    stop_quoting_fn()
                     self._send_json(200, {"ok": True})
                 except Exception as exc:
                     self._send_json(500, {"ok": False, "error": str(exc)})
@@ -1641,6 +1798,7 @@ class Dashboard:
         flatten_sell_fn: Optional[Callable[[], None]] = None,
         update_config_fn: Optional[Callable[[dict], dict]] = None,
         start_quoting_fn: Optional[Callable[[], None]] = None,
+        stop_quoting_fn: Optional[Callable[[], None]] = None,
     ):
         self.host = host
         self.port = port
@@ -1653,6 +1811,7 @@ class Dashboard:
                 flatten_sell_fn,
                 update_config_fn,
                 start_quoting_fn,
+                stop_quoting_fn,
             ),
         )
         self._thread: threading.Thread = threading.Thread(
