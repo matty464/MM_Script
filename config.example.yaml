@@ -123,6 +123,9 @@ ml:
   forgetting_factor: 0.990
   max_signal_bps: 10.0
   min_updates: 30
+  # Persistence (state/ml_model.json). Set load_saved: false for a fresh model every run.
+  load_saved: true
+  save: true
 
 # Adaptive inventory-skew controller (multi-armed bandit). Trials multipliers
 # of inventory_skew_bps and learns from per-fill realized PnL which one
@@ -133,6 +136,8 @@ adaptive_skew:
   ewma_alpha: 0.2                # how fast per-arm reward updates
   min_pulls_per_switch: 5        # closing fills before switching arms
   multipliers: [0.5, 0.75, 1.0, 1.25, 1.5]
+  load_saved: true               # false = ignore state/skew_adapter.json on startup
+  save: true                     # false = do not write skew_adapter.json
 
 # ---------------------------------------------------------------------------
 # Dashboard (web UI)

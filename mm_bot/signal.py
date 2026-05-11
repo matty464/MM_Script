@@ -137,15 +137,19 @@ class RLSPredictor:
         while self._pending and ts >= self._pending[0].ts + self.horizon_s:
             record = self._pending.popleft()
             if record.mid_at_prediction > 0 and mid > 0:
+                # Skip only identical/near-identical mids (would be log-return ≈ 0).
+                if abs(mid - record.mid_at_prediction) / record.mid_at_prediction < 1e-10:
+                    continue
                 actual_bps = math.log(mid / record.mid_at_prediction) * 1e4
-                self._rls_update(record.features, actual_bps)
-                # Track stats
+                # One-step-ahead error: predict with weights *before* this label,
+                # otherwise MAE/corr are in-sample (artificially perfect).
                 pred_bps = self._dot(record.features, self.w)
+                self._rls_update(record.features, actual_bps)
                 self._recent_errors.append(abs(pred_bps - actual_bps))
                 self._recent_pred.append(pred_bps)
                 self._recent_actual.append(actual_bps)
 
-        # --- Predict ---
+        # --- Predict ---  (enqueue every tick so the horizon queue never starves)
         self._pending.append(PredictionRecord(ts=ts, features=list(x), mid_at_prediction=mid))
 
         if self._n_updates < self.min_updates:
@@ -157,10 +161,7 @@ class RLSPredictor:
 
     def stats(self) -> SignalStats:
         mae_raw = (sum(self._recent_errors) / len(self._recent_errors)) if self._recent_errors else 0.0
-        # Tiny MAE from a quiet window reads as 0.00 bps in the UI — apply a soft floor
-        # only once we have enough samples.
-        n_err = len(self._recent_errors)
-        mae = max(mae_raw, 0.03) if n_err >= 12 and mae_raw < 0.03 else mae_raw
+        mae = mae_raw
         corr = _pearson(list(self._recent_pred), list(self._recent_actual))
         return SignalStats(
             n_updates=self._n_updates,
@@ -182,8 +183,8 @@ class RLSPredictor:
         # x^T P x
         xTPx = sum(x[i] * Px[i] for i in range(n))
 
-        # Gain vector k = P x / (λ + x^T P x)
-        denom = lam + xTPx
+        # Gain vector k = P x / (λ + x^T P x + ridge). Small ridge improves conditioning.
+        denom = lam + xTPx + 1e-6
         if abs(denom) < 1e-12:
             return
         k = [Px[i] / denom for i in range(n)]
@@ -199,6 +200,16 @@ class RLSPredictor:
         for i in range(n):
             for j in range(n):
                 self.P[i][j] = (self.P[i][j] - k[i] * Px[j]) / lam
+
+        # Forgetting shrinks P in expectation, but ill-conditioned x can blow up
+        # the gain k and explode P — cap trace so weights stay usable.
+        trace_p = sum(self.P[i][i] for i in range(n))
+        max_trace = float(n) * 50_000.0
+        if trace_p > max_trace and trace_p > 0:
+            s = max_trace / trace_p
+            for i in range(n):
+                for j in range(n):
+                    self.P[i][j] *= s
 
         self._n_updates += 1
 
@@ -225,6 +236,15 @@ class RLSPredictor:
         self.w = list(d["w"])
         self.P = [list(row) for row in d["P"]]
         self._n_updates = int(d.get("n_updates", 0))
+        n = self.n
+        trace_p = sum(self.P[i][i] for i in range(n))
+        max_trace = float(n) * 50_000.0
+        if trace_p > max_trace and trace_p > 0:
+            s = max_trace / trace_p
+            for i in range(n):
+                for j in range(n):
+                    self.P[i][j] *= s
+            log.warning("RLS loaded P trace was %.2e — scaled down for stability", trace_p)
         log.info(
             "RLS model loaded: n_updates=%d w=%s",
             self._n_updates,
@@ -238,14 +258,14 @@ class RLSPredictor:
 
 def _pearson(xs: List[float], ys: List[float]) -> float:
     n = len(xs)
-    if n < 8:
+    if n < 20:
         return 0.0
     mx = sum(xs) / n
     my = sum(ys) / n
     ssx = sum((x - mx) ** 2 for x in xs)
     ssy = sum((y - my) ** 2 for y in ys)
-    # If either series barely moved, correlation is ill-defined (would blow up to ±1).
-    if ssx < 1e-6 or ssy < 1e-6:
+    # Need real variation in *both* pred and actual (bps-scale); else r is meaningless.
+    if ssx < 0.25 or ssy < 0.25:
         return 0.0
     num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     r = num / (math.sqrt(ssx * ssy) + 1e-15)
@@ -268,6 +288,8 @@ class FairValueSignal:
         max_signal_bps: float = 10.0,
         min_updates: int = 30,
         state_dir: str = DEFAULT_STATE_DIR,
+        load_saved: bool = True,
+        save_enabled: bool = True,
     ):
         self.extractor = FeatureExtractor()
         self.model = RLSPredictor(
@@ -279,11 +301,20 @@ class FairValueSignal:
         )
         self._last_signal_bps: float = 0.0
         self._enabled: bool = True
+        self._load_saved = load_saved
+        self._save_enabled = save_enabled
         self._state_dir = Path(state_dir)
         self._model_path = self._state_dir / "ml_model.json"
         self._updates_since_save: int = 0
 
-        self._load()
+        if load_saved:
+            self._load()
+        else:
+            log.info("ML load_saved=false — starting with fresh RLS weights (ignoring %s)", self._model_path)
+
+    def set_save_enabled(self, enabled: bool) -> None:
+        """Enable/disable writing ml_model.json (autosave + shutdown)."""
+        self._save_enabled = bool(enabled)
 
     # ------------------------------------------------------------------
     # Persistence
@@ -309,6 +340,8 @@ class FairValueSignal:
 
     def save(self) -> None:
         """Save model weights to disk. Called automatically + on shutdown."""
+        if not self._save_enabled:
+            return
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             tmp = self._model_path.with_suffix(".json.tmp")

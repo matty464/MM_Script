@@ -62,6 +62,10 @@ class BotConfig:
     ml_forgetting_factor: float
     ml_max_signal_bps: float
     ml_min_updates: int
+    # If True, restore RLS from state/ml_model.json on startup; if False, fresh weights.
+    ml_load_saved: bool
+    # If True, write ml_model.json on autosave and shutdown.
+    ml_save: bool
 
     # Adaptive inventory-skew controller (multi-armed bandit). When enabled,
     # the bot continuously trials different multipliers of `inventory_skew_bps`
@@ -71,6 +75,8 @@ class BotConfig:
     adaptive_skew_alpha: float          # EWMA smoothing for per-arm reward
     adaptive_skew_min_pulls: int        # closing fills per arm before reconsider
     adaptive_skew_multipliers: list     # multipliers around inventory_skew_bps
+    adaptive_skew_load_saved: bool
+    adaptive_skew_save: bool
 
     dashboard_enabled: bool
     dashboard_host: str
@@ -147,6 +153,8 @@ def load_config(config_path: str = "config.yaml", env_path: str = ".env") -> Bot
         ml_forgetting_factor=float(raw.get("ml", {}).get("forgetting_factor", 0.990)),
         ml_max_signal_bps=float(raw.get("ml", {}).get("max_signal_bps", 10.0)),
         ml_min_updates=int(raw.get("ml", {}).get("min_updates", 30)),
+        ml_load_saved=bool(raw.get("ml", {}).get("load_saved", True)),
+        ml_save=bool(raw.get("ml", {}).get("save", True)),
         adaptive_skew_enabled=bool(raw.get("adaptive_skew", {}).get("enabled", True)),
         adaptive_skew_epsilon=float(raw.get("adaptive_skew", {}).get("epsilon", 0.15)),
         adaptive_skew_alpha=float(raw.get("adaptive_skew", {}).get("ewma_alpha", 0.2)),
@@ -154,6 +162,8 @@ def load_config(config_path: str = "config.yaml", env_path: str = ".env") -> Bot
         adaptive_skew_multipliers=list(
             raw.get("adaptive_skew", {}).get("multipliers", [0.5, 0.75, 1.0, 1.25, 1.5])
         ),
+        adaptive_skew_load_saved=bool(raw.get("adaptive_skew", {}).get("load_saved", True)),
+        adaptive_skew_save=bool(raw.get("adaptive_skew", {}).get("save", True)),
         dashboard_enabled=bool(raw.get("dashboard", {}).get("enabled", True)),
         dashboard_host=str(raw.get("dashboard", {}).get("host", "127.0.0.1")),
         dashboard_port=int(raw.get("dashboard", {}).get("port", 8765)),

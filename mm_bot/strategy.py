@@ -72,6 +72,7 @@ TUNABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     "ml_max_signal_bps":          {"type": float, "group": "ML",       "label": "ML max signal (bps)",       "validate": _gt0},
     "ml_forgetting_factor":       {"type": float, "group": "ML",       "label": "ML forgetting factor",      "validate": _forget},
     "ml_min_updates":             {"type": int,   "group": "ML",       "label": "ML min updates",            "validate": _gte0},
+    "ml_save":                    {"type": bool,  "group": "ML",       "label": "ML save to disk",           "validate": lambda v: None},
     # Adaptive skew (multi-armed bandit)
     "adaptive_skew_enabled":      {"type": bool,  "group": "Adaptive", "label": "adaptive skew enabled",      "validate": lambda v: None},
     "adaptive_skew_epsilon":      {"type": float, "group": "Adaptive", "label": "adaptive skew epsilon",      "validate": _eps},
@@ -103,6 +104,8 @@ class Strategy:
             forgetting_factor=cfg.ml_forgetting_factor,
             max_signal_bps=cfg.ml_max_signal_bps,
             min_updates=cfg.ml_min_updates,
+            load_saved=cfg.ml_load_saved,
+            save_enabled=cfg.ml_save,
         )
         if cfg.adaptive_skew_enabled:
             self.skew_adapter: Optional[SkewAdapter] = SkewAdapter(
@@ -112,10 +115,13 @@ class Strategy:
                 ewma_alpha=cfg.adaptive_skew_alpha,
                 min_pulls_per_switch=cfg.adaptive_skew_min_pulls,
             )
-            try:
-                self.skew_adapter.load()
-            except Exception as exc:
-                log.warning("[skew-adapter] load on init failed: %s", exc)
+            if cfg.adaptive_skew_load_saved:
+                try:
+                    self.skew_adapter.load()
+                except Exception as exc:
+                    log.warning("[skew-adapter] load on init failed: %s", exc)
+            else:
+                log.info("adaptive_skew.load_saved=false — bandit starts fresh")
         else:
             self.skew_adapter = None
         self.quoter = Quoter(cfg, sz_decimals, signal=self.signal, skew_adapter=self.skew_adapter)
@@ -225,13 +231,16 @@ class Strategy:
         except Exception:
             pass
 
-        try:
-            self.signal.save()
-            log.info("ML model saved on shutdown")
-        except Exception as exc:
-            log.warning("ML model save failed on shutdown: %s", exc)
+        if self.cfg.ml_save:
+            try:
+                self.signal.save()
+                log.info("ML model saved on shutdown")
+            except Exception as exc:
+                log.warning("ML model save failed on shutdown: %s", exc)
+        else:
+            log.info("ML save disabled — not writing ml_model.json")
 
-        if self.skew_adapter is not None:
+        if self.skew_adapter is not None and self.cfg.adaptive_skew_save:
             try:
                 self.skew_adapter.save()
                 log.info(
@@ -241,6 +250,8 @@ class Strategy:
                 )
             except Exception as exc:
                 log.warning("skew adapter save failed on shutdown: %s", exc)
+        elif self.skew_adapter is not None:
+            log.info("adaptive skew save disabled — not writing skew_adapter.json")
 
         log.info(
             "final stats: fills=%d realized_pnl=%.4f USD position=%.6g",
@@ -511,6 +522,9 @@ class Strategy:
             "mode": self.cfg.mode,
             "symbol": self.cfg.symbol,
             "manual_quoting_start": self.cfg.manual_quoting_start,
+            "ml_load_saved": self.cfg.ml_load_saved,
+            "adaptive_skew_load_saved": self.cfg.adaptive_skew_load_saved,
+            "adaptive_skew_save": self.cfg.adaptive_skew_save,
         }
         for key in TUNABLE_FIELDS:
             snap[key] = getattr(self.cfg, key, None)
@@ -572,6 +586,8 @@ class Strategy:
             self.signal.model.lam = float(value)
         elif key == "ml_min_updates":
             self.signal.model.min_updates = int(value)
+        elif key == "ml_save":
+            self.signal.set_save_enabled(bool(value))
         elif key == "inventory_skew_bps" and self.skew_adapter is not None:
             # Adapter's effective skew = base × multiplier; keep base in sync.
             self.skew_adapter.set_base_skew(float(value))
@@ -604,17 +620,19 @@ class Strategy:
                 ewma_alpha=self.cfg.adaptive_skew_alpha,
                 min_pulls_per_switch=self.cfg.adaptive_skew_min_pulls,
             )
-            try:
-                self.skew_adapter.load()
-            except Exception:
-                pass
+            if self.cfg.adaptive_skew_load_saved:
+                try:
+                    self.skew_adapter.load()
+                except Exception:
+                    pass
             self.quoter.skew_adapter = self.skew_adapter
             log.warning("[runtime] skew adapter ENABLED")
         elif (not enable) and self.skew_adapter is not None:
-            try:
-                self.skew_adapter.save()
-            except Exception:
-                pass
+            if self.cfg.adaptive_skew_save:
+                try:
+                    self.skew_adapter.save()
+                except Exception:
+                    pass
             self.skew_adapter = None
             self.quoter.skew_adapter = None
             log.warning("[runtime] skew adapter DISABLED — using static cfg.inventory_skew_bps")
@@ -639,8 +657,8 @@ class Strategy:
                     "spread_bps": round(s.weights[7], 4) if len(s.weights) > 7 else 0,
                     "funding": round(s.weights[8], 4) if len(s.weights) > 8 else 0,
                 },
-                "recent_pred": [round(x, 4) for x in s.recent_pred],
-                "recent_actual": [round(x, 4) for x in s.recent_actual],
+                "recent_pred": [round(x, 6) for x in s.recent_pred],
+                "recent_actual": [round(x, 6) for x in s.recent_actual],
             }
         except Exception:
             return {}
